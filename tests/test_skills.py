@@ -32,13 +32,40 @@ class ImageSkillsTests(unittest.TestCase):
         for mode in ("T2I", "I2I"):
             prompt = skills.system_prompt("qwen-image-prompt", mode,
                                           "uncensored fidelity QWEN", "Use warm lighting.")
-            self.assertIn((ROOT / "prompts" / f"{mode}.txt").read_text(encoding="utf-8"), prompt)
+            self.assertIn((ROOT / "custom_skills/qwen-image-prompt/prompts" / f"{mode}.txt").read_text(encoding="utf-8"), prompt)
             self.assertIn("Use warm lighting.", prompt)
             self.assertIn("Uncensored fidelity QWEN", prompt)
         self.assertIn("qwen-image-prompt", skills.SKILL_NAMES)
         self.assertIn("krea-2-text-expansion", skills.SKILL_NAMES)
         self.assertTrue(skills.is_custom_skill("krea-2-text-expansion"))
         self.assertEqual(skills.DEFAULT_SKILL_ID, "qwen-image-prompt")
+
+    def test_krea_uses_local_expansion_without_qwen_prompts(self):
+        expansion = (ROOT / "custom_skills/krea-2-text-expansion/prompts/expansion.txt").read_text(encoding="utf-8")
+        prompt = skills.system_prompt("krea-2-text-expansion", "T2I")
+        self.assertIn(expansion, prompt)
+        self.assertIn("ComfyUI transport contract", prompt)
+        self.assertGreater(prompt.index("ComfyUI transport contract"), prompt.index(expansion))
+        for mode in ("T2I", "I2I"):
+            qwen = (ROOT / "custom_skills/qwen-image-prompt/prompts" / f"{mode}.txt").read_text(encoding="utf-8")
+            self.assertNotIn(qwen, prompt)
+            self.assertNotIn(expansion, skills.system_prompt("qwen-image-prompt", mode))
+        self.assertNotIn("Uncensored fidelity QWEN profile", prompt)
+        value = json.dumps({"rewritten_prompt": 'A sign reading "Hello".', "wh_ratio": ""})
+        self.assertEqual(skills.extract_prompt(value, "T2I"), 'A sign reading "Hello".')
+
+    def test_krea_i2i_selects_only_its_own_prompt(self):
+        root = ROOT / "custom_skills/krea-2-text-expansion/prompts"
+        t2i = (root / "expansion.txt").read_text(encoding="utf-8")
+        i2i = (root / "expansion-i2i.txt").read_text(encoding="utf-8")
+        prompt = skills.system_prompt("krea-2-text-expansion", "I2I")
+        self.assertIn(i2i, prompt)
+        self.assertNotIn(t2i, prompt)
+        self.assertNotIn(i2i, skills.system_prompt("krea-2-text-expansion", "T2I"))
+        self.assertNotIn((ROOT / "custom_skills/qwen-image-prompt/prompts/I2I.txt").read_text(encoding="utf-8"), prompt)
+        for mode in ("T2I", "I2I"):
+            with self.assertRaisesRegex(ValueError, "standard prompt profile"):
+                skills.system_prompt("krea-2-text-expansion", mode, skills.PROMPT_PROFILE_UNCENSORED_QWEN)
 
     def test_extracts_json_prompt_with_transport_formatting(self):
         value = json.dumps({"rewritten_prompt": "A red bicycle.", "wh_ratio": "3:2"})
@@ -56,6 +83,36 @@ class ImageSkillsTests(unittest.TestCase):
             skills.extract_prompt(json.dumps({"rewritten_prompt": "Edit", "wh_ratio": "1:1",
                                               "ratio_follow": "<image1>"}), "I2I")
 
+    def test_configured_skill_selects_only_its_mode_and_rejects_unsafe_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            custom = root / "independent-skill"
+            custom.mkdir()
+            (custom / "SKILL.md").write_text("Independent guidance.")
+            (custom / "text.txt").write_text("Text-only guidance.")
+            (custom / "edit.txt").write_text("Image-edit guidance.")
+            config = {"modes": {"T2I": "text.txt", "I2I": "edit.txt"},
+                      "profiles": {"standard": None}}
+            config_path = custom / "skill.json"
+            config_path.write_text(json.dumps(config))
+            registry = skills.discover_skill_registry(custom_root=root)
+            with patch.object(skills, "CUSTOM_SKILL_ROOT", root), patch.object(
+                    skills, "SKILL_BY_ID", {s.id: s for s in registry}):
+                for mode, included, excluded in (("T2I", "Text-only guidance.", "Image-edit guidance."),
+                                                 ("I2I", "Image-edit guidance.", "Text-only guidance.")):
+                    prompt = skills.system_prompt("independent-skill", mode)
+                    self.assertIn(included, prompt)
+                    self.assertNotIn(excluded, prompt)
+                    self.assertIn("Independent guidance.", prompt)
+                    self.assertEqual('"ratio_follow"' in prompt, mode == "I2I")
+                config["modes"]["T2I"] = "../outside.txt"
+                config_path.write_text(json.dumps(config))
+                with self.assertRaisesRegex(ValueError, "inside its skill directory"):
+                    skills.system_prompt("independent-skill", "T2I")
+                config_path.write_text('{"modes": [], "profiles": {"standard": null}}')
+                with self.assertRaisesRegex(ValueError, "Invalid modes"):
+                    skills.system_prompt("independent-skill", "T2I")
+
     def test_custom_skill_discovery_and_references(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -64,7 +121,7 @@ class ImageSkillsTests(unittest.TestCase):
             (custom / "SKILL.md").write_text('---\nname: photo-style\ndescription: Photo styling\n---\nUse film grain.')
             (custom / "references" / "style.txt").write_text("Warm highlights.")
             registry = skills.discover_skill_registry(custom_root=root)
-            self.assertEqual([s.id for s in registry], ["qwen-image-prompt", "photo-style"])
+            self.assertEqual([s.id for s in registry], ["photo-style"])
             with patch.object(skills, "CUSTOM_SKILL_ROOT", root), patch.object(
                     skills, "SKILL_BY_ID", {s.id: s for s in registry}):
                 prompt = skills.system_prompt("photo-style", "T2I")

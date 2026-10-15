@@ -105,7 +105,7 @@ class NodeTests(unittest.TestCase):
         self.assertEqual(set(model_field.options), set(node.DEFAULT_MODELS.values()))
         self.assertIn(model_field.default, model_field.options)
         self.assertEqual(next(f for f in schema.inputs if f.name == "skill").options,
-                         ["qwen-image-prompt", "krea-2-text-expansion"])
+                         ["krea-2-text-expansion", "qwen-image-prompt"])
         self.assertEqual(next(f for f in schema.inputs if f.name == "mmproj").default, "")
 
     def test_t2i_without_images_loads_only_t2i_without_projector(self):
@@ -128,6 +128,39 @@ class NodeTests(unittest.TestCase):
                          ["<image1>", "<image2>", "Combine these"])
         self.assertEqual(self.manager.acquire.call_args.args[1], self.root / node.DEFAULT_MMPROJ)
         self.manager.release.assert_not_called()
+
+    def test_krea_instructions_reach_server_without_qwen_prompt(self):
+        result = node.ImagePromptLlamaCpp.execute("A bicycle", skill="krea-2-text-expansion")
+        system = self.server.chat.call_args.args[0][0]["content"]
+        expansion = (ROOT / "custom_skills/krea-2-text-expansion/prompts/expansion.txt").read_text(encoding="utf-8")
+        self.assertIn(expansion, system)
+        self.assertNotIn((ROOT / "custom_skills/qwen-image-prompt/prompts/T2I.txt").read_text(encoding="utf-8"), system)
+        self.assertEqual(result.result[1], "krea-2-text-expansion")
+
+    def test_krea_invalid_settings_fail_before_model_loading(self):
+        for settings in ({"prompt_profile": "uncensored fidelity QWEN"},
+                         {"mode": "I2I", "prompt_profile": "uncensored fidelity QWEN"}):
+            with self.assertRaisesRegex(ValueError, "krea-2-text-expansion"):
+                node.ImagePromptLlamaCpp.execute("A bicycle", skill="krea-2-text-expansion", **settings)
+        self.manager.acquire.assert_not_called()
+
+    def test_krea_i2i_forwards_references_and_parses_output(self):
+        self.server.chat.return_value = (json.dumps({"rewritten_prompt": "Edit the person from <image1> using the pose from <image2>.",
+                                                    "wh_ratio": "", "ratio_follow": "<image1>"}), {})
+        result = node.ImagePromptLlamaCpp.execute(
+            "Use the second pose", skill="krea-2-text-expansion", mode="I2I",
+            model=node.DEFAULT_MODELS["I2I"], mmproj=node.DEFAULT_MMPROJ,
+            reference_image_2=image("identity"), reference_image_7=image("pose"))
+        messages = self.server.chat.call_args.args[0]
+        prompt = (ROOT / "custom_skills/krea-2-text-expansion/prompts/expansion-i2i.txt").read_text(encoding="utf-8")
+        self.assertIn(prompt, messages[0]["content"])
+        content = messages[1]["content"]
+        self.assertEqual([p["text"] for p in content if p["type"] == "text"],
+                         ["<image1>", "<image2>", "Use the second pose"])
+        self.assertEqual([p["image_url"]["url"] for p in content if p["type"] == "image_url"],
+                         ["identity", "pose"])
+        self.assertEqual(result.result, ("Edit the person from <image1> using the pose from <image2>.",
+                                         "krea-2-text-expansion", "I2I"))
 
     def test_all_ten_images_forwarded(self):
         self.server.chat.return_value = response("I2I")

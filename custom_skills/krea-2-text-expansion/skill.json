@@ -1,0 +1,9 @@
+{
+  "modes": {
+    "T2I": "prompts/expansion.txt",
+    "I2I": "prompts/expansion-i2i.txt"
+  },
+  "profiles": {
+    "standard": null
+  }
+}

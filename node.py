@@ -123,6 +123,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 mode = resolve_mode(mode, len(images))
                 if skill not in SKILL_NAMES:
                     raise ValueError(f"Unknown skill: {skill}; select an available skill")
+                instructions = system_prompt(skill, mode, prompt_profile, additional_system_instructions)
                 if Path(model).suffix.lower() != ".gguf" or is_projector(model):
                     raise ValueError("Select a GGUF language model, not a projector file")
                 if mode == "T2I":
@@ -144,8 +145,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                             mode, len(images), model.name, loaded_new, seed)
                 selected = skill
                 messages = [
-                    {"role": "system", "content": system_prompt(
-                        selected, mode, prompt_profile, additional_system_instructions)},
+                    {"role": "system", "content": instructions},
                     {"role": "user", "content": _user_content(prompt, images)},
                 ]
                 settings = dict(seed=seed, max_tokens=max_tokens, think_mode=think_mode,
