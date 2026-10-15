@@ -22,7 +22,7 @@ from .skills import (
 MODEL_DIR = Path(folder_paths.models_dir) / "LLM"
 INFERENCE_LOCK = threading.Lock()
 SERVER_MANAGER = LlamaServerManager()
-LOGGER = logging.getLogger("ComfyUI.QwenImagePrompt")
+LOGGER = logging.getLogger("ComfyUI.ImagePromptLlamaCpp")
 atexit.register(SERVER_MANAGER.release)
 
 
@@ -60,15 +60,15 @@ def _user_content(prompt, images):
     return content
 
 
-class QwenImagePrompt(io.ComfyNode):
+class ImagePromptLlamaCpp(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         models = model_options(MODEL_DIR)
         return io.Schema(
-            node_id="QwenImagePromptSimple",
-            display_name="Qwen Image 2.1 Prompt (Simple)",
-            category="😺dzNodes/Qwen_Image_Prompt",
-            description="Qwen-Image 2.1 T2I / I2I prompt enhancer using llama.cpp b11115.",
+            node_id="ComfyUI_Image_Prompt_llama-cpp",
+            display_name="ComfyUI_Image_Prompt_llama-cpp",
+            category="😺dzNodes/Image_Prompt_llama-cpp",
+            description="Skill-based T2I / I2I image prompt enhancer using llama.cpp b11115.",
             inputs=[
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True,
                                 default="Describe the image or the desired edit."),
@@ -140,7 +140,7 @@ class QwenImagePrompt(io.ComfyNode):
                 comfy.model_management.unload_all_models()
                 comfy.model_management.soft_empty_cache()
                 server, loaded_new = SERVER_MANAGER.acquire(model, projector)
-                LOGGER.info("[Qwen Image] mode=%s images=%d model=%s new=%s seed=%d",
+                LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] mode=%s images=%d model=%s new=%s seed=%d",
                             mode, len(images), model.name, loaded_new, seed)
                 selected = skill
                 messages = [
@@ -154,14 +154,14 @@ class QwenImagePrompt(io.ComfyNode):
                 try:
                     result = extract_prompt(result, mode)
                 except ValueError as error:
-                    LOGGER.warning("[Qwen Image] Repairing model output: %s", error)
+                    LOGGER.warning("[ComfyUI_Image_Prompt_llama-cpp] Repairing model output: %s", error)
                     repaired, usage = server.chat([
                         *messages, {"role": "assistant", "content": result},
                         {"role": "user", "content": "Return the complete valid JSON object required "
                          "by the system prompt. Preserve the requested content. Problem: " + str(error)},
                     ], **settings)
                     result = extract_prompt(repaired, mode)
-                LOGGER.info("[Qwen Image] completed in %.2fs | usage=%s", time.perf_counter() - started, usage)
+                LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] completed in %.2fs | usage=%s", time.perf_counter() - started, usage)
                 if force_unload_model:
                     _release_node_resources()
                 return io.NodeOutput(result, selected, mode)
@@ -169,15 +169,15 @@ class QwenImagePrompt(io.ComfyNode):
                 try:
                     _release_node_resources()
                 except Exception:
-                    LOGGER.exception("[Qwen Image] Cleanup failed")
-                LOGGER.exception("[Qwen Image] Execution failed")
+                    LOGGER.exception("[ComfyUI_Image_Prompt_llama-cpp] Cleanup failed")
+                LOGGER.exception("[ComfyUI_Image_Prompt_llama-cpp] Execution failed")
                 raise
 
 
-class QwenImagePromptExtension(ComfyExtension):
+class ImagePromptLlamaCppExtension(ComfyExtension):
     async def get_node_list(self):
-        return [QwenImagePrompt]
+        return [ImagePromptLlamaCpp]
 
 
-async def comfy_entrypoint() -> QwenImagePromptExtension:
-    return QwenImagePromptExtension()
+async def comfy_entrypoint() -> ImagePromptLlamaCppExtension:
+    return ImagePromptLlamaCppExtension()

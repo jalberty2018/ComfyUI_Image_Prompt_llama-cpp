@@ -35,7 +35,10 @@ class ImageSkillsTests(unittest.TestCase):
             self.assertIn((ROOT / "prompts" / f"{mode}.txt").read_text(encoding="utf-8"), prompt)
             self.assertIn("Use warm lighting.", prompt)
             self.assertIn("Uncensored fidelity QWEN", prompt)
-        self.assertEqual(skills.SKILL_NAMES, ("qwen-image-prompt",))
+        self.assertIn("qwen-image-prompt", skills.SKILL_NAMES)
+        self.assertIn("krea-2-text-expansion", skills.SKILL_NAMES)
+        self.assertTrue(skills.is_custom_skill("krea-2-text-expansion"))
+        self.assertEqual(skills.DEFAULT_SKILL_ID, "qwen-image-prompt")
 
     def test_extracts_json_prompt_with_transport_formatting(self):
         value = json.dumps({"rewritten_prompt": "A red bicycle.", "wh_ratio": "3:2"})

@@ -1,13 +1,13 @@
-# ComfyUI Qwen Image 2.1 Prompt
+# ComfyUI_Image_Prompt_llama-cpp
 
-Local prompt enhancement for Qwen-Image 2.1 using local GGUF language models (including the two Heretic prompt rewriters) and an external llama.cpp **b11115** executable. Add **Qwen Image 2.1 Prompt (Simple)** to your workflow.
+Local image prompt enhancement using GGUF language models (including the two Heretic prompt rewriters) and an external llama.cpp **b11115** executable. Includes the default Qwen-Image 2.1 skill and a custom Krea 2 text-expansion skill. Add **ComfyUI_Image_Prompt_llama-cpp** to your workflow.
 
 ## Installation
 
 From your ComfyUI directory:
 
 ```sh
-git clone https://github.com/jalberty2018/ComfyUI_Qwen_Image_Prompt.git custom_nodes/ComfyUI_Qwen_Image_Prompt
+git clone https://github.com/jalberty2018/ComfyUI_Image_Prompt_llama-cpp.git custom_nodes/ComfyUI_Image_Prompt_llama-cpp
 ```
 
 Download the models and configure llama.cpp as described below, then restart ComfyUI.
@@ -22,9 +22,15 @@ Select `skill`, `model`, `mmproj` and `mode` explicitly. The mode selector offer
 
 There are exactly ten optional IMAGE inputs, `reference_image_1` through `reference_image_10`. Disconnected inputs and inputs returning `None` are skipped. Each supplied tensor must hold one image, not a batch. Nonempty inputs are numbered consecutively as `<image1>`, `<image2>`, etc., in socket order. Refer to these consecutive numbers in your request. Video and audio inputs are not supported.
 
-The three STRING outputs retain their existing names and order: `h3_prompt`, `selected_skill`, `detected_mode`. The historical first name is retained only for output compatibility; its value is the extracted `rewritten_prompt` for Qwen Image. The third output reports the selected `T2I` or `I2I` mode. Aspect-ratio metadata is parsed internally and is not exposed as an additional output.
+The three STRING outputs retain their existing names and order: `h3_prompt`, `selected_skill`, `detected_mode`. The historical first name is retained only for output compatibility; its value is the extracted `rewritten_prompt` for the selected skill. The third output reports the selected `T2I` or `I2I` mode. Aspect-ratio metadata is parsed internally and is not exposed as an additional output.
 
-This layout uses the new `QwenImagePromptSimple` ID to prevent old positional widget values from being silently applied to different fields. After updating, restart ComfyUI, refresh the page, and replace the old node with **Qwen Image 2.1 Prompt (Simple)**. Reconnect its inputs and three outputs. Old workflow nodes are not migrated automatically. Existing Simple nodes gain a `mode` selector (default `T2I`); explicitly choose `I2I` for image editing workflows.
+### Krea 2 text expansion
+
+Select `skill=krea-2-text-expansion`, `mode=T2I`, and a compatible local GGUF language model. Leave `mmproj` empty and enter your image idea. Connect `h3_prompt` to the text prompt input of your Krea 2 workflow. Restart ComfyUI and refresh the page after adding the skill.
+
+The [custom skill](custom_skills/krea-2-text-expansion/SKILL.md) adapts Krea's official [expansion instructions](https://github.com/krea-ai/krea-2/blob/main/docs/expansion.txt) and [prompting guidelines](https://github.com/krea-ai/krea-2/blob/main/docs/prompting.md). It preserves the brief and requested medium, avoids unsupported scene additions, and quotes requested visible text. The node still requires JSON internally and extracts the expanded paragraph for its output. This skill prepares text for Krea 2; it does not load or run the Krea image model.
+
+The node ID and display name are both `ComfyUI_Image_Prompt_llama-cpp`. After updating, restart ComfyUI, refresh the page, and replace the old node with **ComfyUI_Image_Prompt_llama-cpp**. Reconnect its inputs and outputs. Previous node IDs are not registered or migrated. Select `T2I` for text generation or `I2I` for image editing workflows.
 
 ## Models
 
