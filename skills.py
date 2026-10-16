@@ -300,7 +300,11 @@ def resolve_mode(selection: str, image_count: int) -> str:
 
 def skill_instructions(skill: str, max_chars: int = 72000) -> str:
     root = _skill_path(skill)
-    parts = [_read(root / "SKILL.md")]
+    # Discovery metadata describes the skill to the loader, not to the model.
+    body = _read(root / "SKILL.md")
+    body = re.sub(r"\A\ufeff?---[^\S\r\n]*\r?\n.*?\r?\n---[^\S\r\n]*(?:\r?\n|$)",
+                  "", body, count=1, flags=re.DOTALL).strip()
+    parts = [body]
     for path in sorted((root / "references").glob("**/*")):
         resolved = path.resolve()
         if (path.is_file() and path.suffix.lower() in {".md", ".txt"}

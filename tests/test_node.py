@@ -113,7 +113,7 @@ class NodeTests(unittest.TestCase):
         (self.root / node.DEFAULT_MODELS["I2I"]).unlink()
         result = node.ImagePromptLlamaCpp.execute("A bicycle", reference_image_3=None)
         self.assertEqual(result.result, ("A precise image prompt.", "qwen-image-prompt", "T2I",
-                                         self.server.chat.call_args.args[0][0]["content"]))
+                                         self.server.chat.call_args.args[0][0]["content"].replace("{", "{{").replace("}", "}}")))
         self.assertIsNone(self.manager.acquire.call_args.args[1])
         self.manager.release.assert_called_once()
 
@@ -147,7 +147,28 @@ class NodeTests(unittest.TestCase):
                 system = self.server.chat.call_args.args[0][0]["content"]
                 self.assertIn(extra, system)
                 self.assertIn(node.system_prompt(skill, "T2I").split("# ComfyUI transport contract")[0].strip(), system)
-                self.assertEqual(result.result[3], system)
+                self.assertEqual(result.result[3].format(), system)
+
+    def test_system_output_survives_krea_template_formatting(self):
+        for skill in node.SKILL_NAMES:
+            for mode in ("T2I", "I2I"):
+                with self.subTest(skill=skill, mode=mode):
+                    self.server.chat.return_value = response(mode)
+                    extra = 'Keep {subject}, {}, {0}, {{literal}}, and JSON {"color": "red"}.'
+                    kwargs = (dict(reference_image_1=image(), mmproj=node.DEFAULT_MMPROJ)
+                              if mode == "I2I" else {})
+                    result = node.ImagePromptLlamaCpp.execute(
+                        "A bicycle", skill=skill, mode=mode,
+                        additional_system_instructions=extra, **kwargs)
+                    original = self.server.chat.call_args.args[0][0]["content"]
+                    template = ("<|im_start|>system\n" + result.result[3] + "<|im_end|>\n"
+                                "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n")
+                    user_text = 'A bicycle with {red} wheels'
+                    rendered = template.format(user_text)
+                    self.assertEqual(rendered, "<|im_start|>system\n" + original + "<|im_end|>\n"
+                                     + "<|im_start|>user\n" + user_text
+                                     + "<|im_end|>\n<|im_start|>assistant\n")
+                    self.assertIn(extra, original)
 
     def test_krea_i2i_forwards_references_and_parses_output(self):
         self.server.chat.return_value = (json.dumps({"rewritten_prompt": "Edit the person from <image1> using the pose from <image2>.",
@@ -165,7 +186,7 @@ class NodeTests(unittest.TestCase):
         self.assertEqual([p["image_url"]["url"] for p in content if p["type"] == "image_url"],
                          ["identity", "pose"])
         self.assertEqual(result.result, ("Edit the person from <image1> using the pose from <image2>.",
-                                         "krea-2-text-expansion", "I2I", messages[0]["content"]))
+                                         "krea-2-text-expansion", "I2I", messages[0]["content"].replace("{", "{{").replace("}", "}}")))
 
     def test_all_ten_images_forwarded(self):
         self.server.chat.return_value = response("I2I")

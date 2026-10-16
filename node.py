@@ -164,7 +164,10 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] completed in %.2fs | usage=%s", time.perf_counter() - started, usage)
                 if force_unload_model:
                     _release_node_resources()
-                return io.NodeOutput(result, selected, mode, instructions)
+                # Downstream encoders interpolate their chat template with str.format.
+                # Escape literal braces only on the exported system message.
+                exported_instructions = instructions.replace("{", "{{").replace("}", "}}")
+                return io.NodeOutput(result, selected, mode, exported_instructions)
             except Exception:
                 try:
                     _release_node_resources()
