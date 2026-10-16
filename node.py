@@ -15,7 +15,6 @@ from .media import image_content, text_content
 from .model_files import DEFAULT_MODELS, DEFAULT_MMPROJ, model_options, is_projector, projector_options, resolve_gguf
 from .runtime import LlamaServerManager
 from .skills import (
-    PROMPT_PROFILES, PROMPT_PROFILE_STANDARD,
     system_prompt, extract_prompt, MODE_OPTIONS, SKILL_NAMES, DEFAULT_SKILL_ID, resolve_mode,
 )
 
@@ -85,7 +84,6 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 io.Int.Input("max_tokens", default=8192, min=256, max=8192, step=128),
                 io.Boolean.Input("force_unload_model", default=True,
                                  tooltip="Stop this node's llama.cpp process after each run. Errors always unload."),
-                io.Combo.Input("prompt_profile", options=list(PROMPT_PROFILES), default=PROMPT_PROFILE_STANDARD),
                 io.String.Input("additional_system_instructions", multiline=True, dynamic_prompts=True, default=""),
                 io.Combo.Input("mode", options=list(MODE_OPTIONS), default="T2I",
                                tooltip="T2I: text only. I2I: requires reference images and a matching mmproj."),
@@ -93,16 +91,16 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                                  tooltip="Optional single image. Empty inputs are skipped; batches are not supported.")
                   for index in range(1, 11)],
             ],
-            # Keep the existing three output names, types and order for downstream links.
-            outputs=[io.String.Output("h3_prompt"), io.String.Output("selected_skill"),
-                     io.String.Output("detected_mode")],
+            # Preserve existing output positions and append the full system prompt.
+            outputs=[io.String.Output("enhanced_prompt"), io.String.Output("selected_skill"),
+                     io.String.Output("detected_mode"), io.String.Output("system_prompt")],
         )
 
     @classmethod
     def execute(cls, prompt, skill="qwen-image-prompt",
                 model=DEFAULT_MODELS["T2I"],
                 think_mode=False, reasoning_effort="medium", seed=0, max_tokens=8192,
-                force_unload_model=True, prompt_profile=PROMPT_PROFILE_STANDARD,
+                force_unload_model=True,
                 additional_system_instructions="",
                 reference_image_1=None, reference_image_2=None, reference_image_3=None,
                 reference_image_4=None, reference_image_5=None, reference_image_6=None,
@@ -123,7 +121,9 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 mode = resolve_mode(mode, len(images))
                 if skill not in SKILL_NAMES:
                     raise ValueError(f"Unknown skill: {skill}; select an available skill")
-                instructions = system_prompt(skill, mode, prompt_profile, additional_system_instructions)
+                instructions = system_prompt(
+                    skill, mode, additional_system_instructions=additional_system_instructions
+                )
                 if Path(model).suffix.lower() != ".gguf" or is_projector(model):
                     raise ValueError("Select a GGUF language model, not a projector file")
                 if mode == "T2I":
@@ -164,7 +164,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] completed in %.2fs | usage=%s", time.perf_counter() - started, usage)
                 if force_unload_model:
                     _release_node_resources()
-                return io.NodeOutput(result, selected, mode)
+                return io.NodeOutput(result, selected, mode, instructions)
             except Exception:
                 try:
                     _release_node_resources()

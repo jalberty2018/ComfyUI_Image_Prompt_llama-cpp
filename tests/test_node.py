@@ -90,13 +90,13 @@ class NodeTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_schema_has_ten_fixed_optional_images_and_original_outputs(self):
+    def test_schema_has_ten_fixed_optional_images_and_expected_outputs(self):
         schema = node.ImagePromptLlamaCpp.define_schema()
         images = [field for field in schema.inputs if (field.name or "").startswith("reference_image_")]
         self.assertEqual(len(images), 10)
         self.assertTrue(all(field.optional for field in images))
-        self.assertEqual([o.name for o in schema.outputs], ["h3_prompt", "selected_skill", "detected_mode"])
-        for removed in ("model_mode", "t2i_model", "i2i_model"):
+        self.assertEqual([o.name for o in schema.outputs], ["enhanced_prompt", "selected_skill", "detected_mode", "system_prompt"])
+        for removed in ("model_mode", "t2i_model", "i2i_model", "prompt_profile"):
             self.assertNotIn(removed, [f.name for f in schema.inputs])
         self.assertEqual(next(f for f in schema.inputs if f.name == "mode").options, ["T2I", "I2I"])
         self.assertEqual(schema.node_id, "ComfyUI_Image_Prompt_llama-cpp")
@@ -112,7 +112,8 @@ class NodeTests(unittest.TestCase):
         (self.root / node.DEFAULT_MMPROJ).unlink()
         (self.root / node.DEFAULT_MODELS["I2I"]).unlink()
         result = node.ImagePromptLlamaCpp.execute("A bicycle", reference_image_3=None)
-        self.assertEqual(result.result, ("A precise image prompt.", "qwen-image-prompt", "T2I"))
+        self.assertEqual(result.result, ("A precise image prompt.", "qwen-image-prompt", "T2I",
+                                         self.server.chat.call_args.args[0][0]["content"]))
         self.assertIsNone(self.manager.acquire.call_args.args[1])
         self.manager.release.assert_called_once()
 
@@ -120,7 +121,7 @@ class NodeTests(unittest.TestCase):
         self.server.chat.return_value = response("I2I")
         result = node.ImagePromptLlamaCpp.execute("Combine these", mode="I2I", model=node.DEFAULT_MODELS["I2I"], mmproj=node.DEFAULT_MMPROJ, reference_image_2=image("second"),
                                              reference_image_10=image("tenth"), force_unload_model=False)
-        self.assertEqual(result.result[-1], "I2I")
+        self.assertEqual(result.result[2], "I2I")
         content = self.server.chat.call_args.args[0][1]["content"]
         self.assertEqual([item["image_url"]["url"] for item in content if item["type"] == "image_url"],
                          ["second", "tenth"])
@@ -137,12 +138,16 @@ class NodeTests(unittest.TestCase):
         self.assertNotIn((ROOT / "custom_skills/qwen-image-prompt/prompts/T2I.txt").read_text(encoding="utf-8"), system)
         self.assertEqual(result.result[1], "krea-2-text-expansion")
 
-    def test_krea_invalid_settings_fail_before_model_loading(self):
-        for settings in ({"prompt_profile": "uncensored fidelity QWEN"},
-                         {"mode": "I2I", "prompt_profile": "uncensored fidelity QWEN"}):
-            with self.assertRaisesRegex(ValueError, "krea-2-text-expansion"):
-                node.ImagePromptLlamaCpp.execute("A bicycle", skill="krea-2-text-expansion", **settings)
-        self.manager.acquire.assert_not_called()
+    def test_additional_instructions_reach_model_and_system_prompt_output(self):
+        for skill in node.SKILL_NAMES:
+            with self.subTest(skill=skill):
+                extra = "Use warm lighting and a muted palette."
+                result = node.ImagePromptLlamaCpp.execute(
+                    "A bicycle", skill=skill, additional_system_instructions=extra)
+                system = self.server.chat.call_args.args[0][0]["content"]
+                self.assertIn(extra, system)
+                self.assertIn(node.system_prompt(skill, "T2I").split("# ComfyUI transport contract")[0].strip(), system)
+                self.assertEqual(result.result[3], system)
 
     def test_krea_i2i_forwards_references_and_parses_output(self):
         self.server.chat.return_value = (json.dumps({"rewritten_prompt": "Edit the person from <image1> using the pose from <image2>.",
@@ -160,7 +165,7 @@ class NodeTests(unittest.TestCase):
         self.assertEqual([p["image_url"]["url"] for p in content if p["type"] == "image_url"],
                          ["identity", "pose"])
         self.assertEqual(result.result, ("Edit the person from <image1> using the pose from <image2>.",
-                                         "krea-2-text-expansion", "I2I"))
+                                         "krea-2-text-expansion", "I2I", messages[0]["content"]))
 
     def test_all_ten_images_forwarded(self):
         self.server.chat.return_value = response("I2I")
@@ -184,7 +189,7 @@ class NodeTests(unittest.TestCase):
     def test_t2i_never_sends_connected_images_or_projector(self):
         result = node.ImagePromptLlamaCpp.execute("A bicycle", reference_image_1=image(),
                                              mmproj=node.DEFAULT_MMPROJ)
-        self.assertEqual(result.result[-1], "T2I")
+        self.assertEqual(result.result[2], "T2I")
         self.assertIsNone(self.manager.acquire.call_args.args[1])
         content = self.server.chat.call_args.args[0][1]["content"]
         self.assertTrue(all(item["type"] == "text" for item in content))
@@ -209,14 +214,14 @@ class NodeTests(unittest.TestCase):
         self.assertIn("Other/model-Q5_K_M.gguf", next(f for f in schema.inputs if f.name == "model").options)
         self.assertIn("Other/mmproj-other-f16.gguf", next(f for f in schema.inputs if f.name == "mmproj").options)
         result = node.ImagePromptLlamaCpp.execute("Describe", model="Other/model-Q5_K_M.gguf")
-        self.assertEqual(result.result[-1], "T2I")
+        self.assertEqual(result.result[2], "T2I")
         self.manager.acquire.assert_called_with(model, None)
         with self.assertRaisesRegex(ValueError, "Select the I2I mmproj"):
             node.ImagePromptLlamaCpp.execute("Edit", mode="I2I", model="Other/model-Q5_K_M.gguf", reference_image_1=image())
         self.server.chat.return_value = response("I2I")
         result = node.ImagePromptLlamaCpp.execute("Edit", mode="I2I", model="Other/model-Q5_K_M.gguf",
                                              mmproj="Other/mmproj-other-f16.gguf", reference_image_1=image("reference"))
-        self.assertEqual(result.result[-1], "I2I")
+        self.assertEqual(result.result[2], "I2I")
         self.manager.acquire.assert_called_with(model, projector)
         content = self.server.chat.call_args.args[0][1]["content"]
         self.assertTrue(any(part.get("image_url", {}).get("url") == "reference" for part in content))
@@ -238,7 +243,7 @@ class NodeTests(unittest.TestCase):
 
     def test_mode_overrides_model_filename_and_connected_images(self):
         result = node.ImagePromptLlamaCpp.execute("A bicycle", mode="T2I", model=node.DEFAULT_MODELS["I2I"], reference_image_1=image())
-        self.assertEqual(result.result[-1], "T2I")
+        self.assertEqual(result.result[2], "T2I")
         self.manager.acquire.assert_called_with(self.root / node.DEFAULT_MODELS["I2I"], None)
 
     def test_more_than_ten_images_rejected(self):

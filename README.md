@@ -22,16 +22,15 @@ Select `skill`, `model`, `mmproj` and `mode` explicitly. The mode selector offer
 
 There are exactly ten optional IMAGE inputs, `reference_image_1` through `reference_image_10`. Disconnected inputs and inputs returning `None` are skipped. Each supplied tensor must hold one image, not a batch. Nonempty inputs are numbered consecutively as `<image1>`, `<image2>`, etc., in socket order. Refer to these consecutive numbers in your request. Video and audio inputs are not supported.
 
-The three STRING outputs retain their existing names and order: `h3_prompt`, `selected_skill`, `detected_mode`. The historical first name is retained only for output compatibility; its value is the extracted `rewritten_prompt` for the selected skill. The third output reports the selected `T2I` or `I2I` mode. Aspect-ratio metadata is parsed internally and is not exposed as an additional output.
+The four STRING outputs are `enhanced_prompt`, `selected_skill`, `detected_mode`, and `system_prompt`. The first output (previously `h3_prompt`) contains the extracted `rewritten_prompt` for the selected skill. The third output reports the selected `T2I` or `I2I` mode. The fourth output contains the complete system prompt sent to the model, including the selected skill and additional system instructions. Existing output positions are preserved. Aspect-ratio metadata is parsed internally and is not exposed as an additional output.
 
 ### Krea 2 text expansion
 
-Select `skill=krea-2-text-expansion`, `mode=T2I`, `prompt_profile=standard`, and a compatible local GGUF language model. Leave `mmproj` empty and enter your image idea. Connect `h3_prompt` to the text prompt input of your Krea 2 workflow. Restart ComfyUI and refresh the page after adding the skill.
+Select `skill=krea-2-text-expansion`, `mode=T2I`, and a compatible local GGUF language model. Leave `mmproj` empty and enter your image idea. Connect `enhanced_prompt` to the text prompt input of your Krea 2 workflow. Restart ComfyUI and refresh the page after adding the skill.
 
-The [custom skill](custom_skills/krea-2-text-expansion/SKILL.md) loads the local, unmodified [expansion.txt](custom_skills/krea-2-text-expansion/prompts/expansion.txt) from [Krea's official instructions](https://github.com/krea-ai/krea-2/blob/main/docs/expansion.txt). It does not load the Qwen T2I or I2I rewriting prompts. A final transport contract wraps the expanded paragraph in `rewritten_prompt` and supplies `wh_ratio` (the requested ratio, or an empty string). This replaces the upstream plain-text output requirement. The Qwen-specific profile is rejected before loading a model. This skill prepares text for Krea 2; it does not run the Krea image model. A general instruction-following GGUF model is preferable; Qwen-specific rewriter models may retain their trained rewriting preferences.
+The [custom skill](custom_skills/krea-2-text-expansion/SKILL.md) loads the local, unmodified [expansion.txt](custom_skills/krea-2-text-expansion/prompts/expansion.txt) from [Krea's official instructions](https://github.com/krea-ai/krea-2/blob/main/docs/expansion.txt). It does not load the Qwen T2I or I2I rewriting prompts. A final transport contract wraps the expanded paragraph in `rewritten_prompt` and supplies `wh_ratio` (the requested ratio, or an empty string). This replaces the upstream plain-text output requirement. This skill prepares text for Krea 2; it does not run the Krea image model. A general instruction-following GGUF model is preferable; Qwen-specific rewriter models may retain their trained rewriting preferences.
 
-For reference-guided generation or editing, select `mode=I2I` with the same skill
-and `prompt_profile=standard`. Connect one to ten reference images and select a
+For reference-guided generation or editing, select `mode=I2I` with the same skill. Connect one to ten reference images and select a
 vision-capable GGUF model plus its matching `mmproj`. This loads the user-provided
 [expansion-i2i.txt](custom_skills/krea-2-text-expansion/prompts/expansion-i2i.txt)
 instead of the T2I prompt. Its output instructions include the required
@@ -80,7 +79,7 @@ Keep the executable's runtime libraries available through the external installat
 
 Seed mapping, thinking/reasoning controls, sampling presets, token budget, model reuse and force unload are retained. `force_unload_model` defaults to true; errors always stop the node-owned server and clear the cache. Switching model, projector or runtime causes a reload.
 
-`prompt_profile` offers `standard` and `uncensored fidelity QWEN`. Additional system instructions are retained. The default skill is `qwen-image-prompt`; the skill selector also includes discovered custom skills.
+`additional_system_instructions` is appended to the selected skill’s system prompt and included in the `system_prompt` output. The node uses the standard skill instructions without a profile selector. The default skill is `qwen-image-prompt`; the skill selector also includes discovered custom skills.
 
 ## Checks
 
