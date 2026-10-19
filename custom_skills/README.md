@@ -1,6 +1,6 @@
 # Custom image prompt skills
 
-All skills live here, including Qwen and Krea. Each subdirectory must contain a
+All skills live here, including Qwen, Krea and FLUX. Each subdirectory must contain a
 `SKILL.md`. Restart ComfyUI and refresh the page after adding or changing skills.
 Select the skill explicitly; the default is `qwen-image-prompt` when available.
 There is no automatic routing or separate built-in skill directory.
@@ -56,6 +56,8 @@ No scripts execute and no internet links are fetched during inference.
 
 ## Included skills
 
+- [FLUX.3 klein pup](flux-3-image-klein-pup/SKILL.md): T2I and I2I with the standard profile, using the original `t2i` and `i2i` system prompts.
+- [FLUX.3 klein pup bounding boxes](flux-3-image-klein-pup-bbox/SKILL.md): T2I and I2I with the standard profile, using `t2i_bbox` and `i2i_bbox`. The complete caption/instruction and element table are returned together inside `rewritten_prompt`. Both FLUX skills use `SKILL.md`, `skill.json`, `prompts/T2I.txt`, `prompts/I2I.txt` and `prompts/sources.json`, matching the Qwen structure. Original prompts and pinned source revisions are preserved under `prompts/`.
 - [Qwen](qwen-image-prompt/SKILL.md): T2I and I2I, both profiles. Its original
   prompts, licenses, and source metadata are in its own `prompts/` directory.
 - [Krea 2](krea-2-text-expansion/SKILL.md): T2I and I2I with the standard profile only. T2I loads the local,

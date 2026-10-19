@@ -1,0 +1,16 @@
+[
+  {
+    "mode": "T2I",
+    "repository": "https://huggingface.co/black-forest-labs/flux-3-image-klein-pup",
+    "revision": "3f3edb52b2c55de0d49feab28598b68f7f8e4830",
+    "system_prompt": "system_prompts.json",
+    "key": "t2i"
+  },
+  {
+    "mode": "I2I",
+    "repository": "https://huggingface.co/black-forest-labs/flux-3-image-klein-pup",
+    "revision": "3f3edb52b2c55de0d49feab28598b68f7f8e4830",
+    "system_prompt": "system_prompts.json",
+    "key": "i2i"
+  }
+]

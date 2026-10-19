@@ -1,0 +1,9 @@
+{
+  "modes": {
+    "T2I": "prompts/T2I.txt",
+    "I2I": "prompts/I2I.txt"
+  },
+  "profiles": {
+    "standard": null
+  }
+}
