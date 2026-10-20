@@ -58,8 +58,14 @@ def image(label="image", batch=1):
     return types.SimpleNamespace(shape=(batch, 16, 16, 3), label=label)
 
 
-def response(mode="T2I"):
+def response(mode="T2I", skill=""):
     value = {"rewritten_prompt": "A precise image prompt.", "wh_ratio": "1:1"}
+    if skill == node.BBOX_SKILL_ID:
+        row = {"id": "person_1", "desc": "A person."}
+        row.update({"from": "ref_image_0", "src_bbox": [0, 0, 1000, 1000],
+                    "tgt_bbox": [0, 0, 1000, 1000]} if mode == "I2I"
+                   else {"bbox": [0, 0, 1000, 1000]})
+        value["rewritten_prompt"] += " " + json.dumps([row])
     if mode == "I2I":
         value["ratio_follow"] = ""
     return json.dumps(value), {"total_tokens": 42}
@@ -105,7 +111,7 @@ class NodeTests(unittest.TestCase):
         self.assertEqual(set(model_field.options), set(node.DEFAULT_MODELS.values()))
         self.assertIn(model_field.default, model_field.options)
         self.assertEqual(next(f for f in schema.inputs if f.name == "skill").options,
-                         ["krea-2-text-expansion", "qwen-image-prompt"])
+                         list(node.SKILL_NAMES))
         self.assertEqual(next(f for f in schema.inputs if f.name == "mmproj").default, "")
 
     def test_t2i_without_images_loads_only_t2i_without_projector(self):
@@ -141,6 +147,7 @@ class NodeTests(unittest.TestCase):
     def test_additional_instructions_reach_model_and_system_prompt_output(self):
         for skill in node.SKILL_NAMES:
             with self.subTest(skill=skill):
+                self.server.chat.return_value = response(skill=skill)
                 extra = "Use warm lighting and a muted palette."
                 result = node.ImagePromptLlamaCpp.execute(
                     "A bicycle", skill=skill, additional_system_instructions=extra)
@@ -153,7 +160,7 @@ class NodeTests(unittest.TestCase):
         for skill in node.SKILL_NAMES:
             for mode in ("T2I", "I2I"):
                 with self.subTest(skill=skill, mode=mode):
-                    self.server.chat.return_value = response(mode)
+                    self.server.chat.return_value = response(mode, skill)
                     extra = 'Keep {subject}, {}, {0}, {{literal}}, and JSON {"color": "red"}.'
                     kwargs = (dict(reference_image_1=image(), mmproj=node.DEFAULT_MMPROJ)
                               if mode == "I2I" else {})
@@ -280,6 +287,22 @@ class NodeTests(unittest.TestCase):
     def test_repairs_invalid_json_once(self):
         self.server.chat.side_effect = [("invalid", {}), response()]
         self.assertEqual(node.ImagePromptLlamaCpp.execute("A bicycle").result[0], "A precise image prompt.")
+        self.assertEqual(self.server.chat.call_count, 2)
+
+    def test_bbox_missing_table_is_repaired_and_references_are_zero_based(self):
+        repaired = response("I2I", node.BBOX_SKILL_ID)
+        self.server.chat.side_effect = [response("I2I"), repaired]
+        result = node.ImagePromptLlamaCpp.execute(
+            'Change <obj_1> to a dark skinned boy. '
+            '[{"id":"obj_1","from":"ref_image_0","src_bbox":[118,221,1000,543],'
+            '"tgt_bbox":null,"desc":""}]',
+            skill=node.BBOX_SKILL_ID, mode="I2I", mmproj=node.DEFAULT_MMPROJ,
+            reference_image_2=image("first"), reference_image_10=image("second"))
+        self.assertEqual(result.result[0], json.loads(repaired[0])["rewritten_prompt"])
+        messages = self.server.chat.call_args.args[0]
+        self.assertEqual([p["text"] for p in messages[1]["content"][:-1]
+                          if p["type"] == "text"], ["<ref_image_0>", "<ref_image_1>"])
+        self.assertIn("do not omit the table", messages[-1]["content"])
         self.assertEqual(self.server.chat.call_count, 2)
 
     def test_failure_always_unloads_even_when_reuse_enabled(self):

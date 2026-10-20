@@ -83,6 +83,25 @@ class ImageSkillsTests(unittest.TestCase):
             skills.extract_prompt(json.dumps({"rewritten_prompt": "Edit", "wh_ratio": "1:1",
                                               "ratio_follow": "<image1>"}), "I2I")
 
+    def test_bbox_requires_complete_table_but_other_profiles_allow_prose(self):
+        for mode in ("T2I", "I2I"):
+            value = {"rewritten_prompt": "Change <obj_1> to a dark skinned boy.", "wh_ratio": ""}
+            if mode == "I2I":
+                value["ratio_follow"] = ""
+            self.assertEqual(skills.extract_prompt(json.dumps(value), mode), value["rewritten_prompt"])
+            for suffix in ("", ' [{"id":"obj_1"}]', " [invalid]"):
+                with self.assertRaisesRegex(ValueError, "JSON element array"):
+                    skills.extract_prompt(json.dumps({**value, "rewritten_prompt":
+                                                      value["rewritten_prompt"] + suffix}),
+                                          mode, skills.BBOX_SKILL_ID)
+            row = {"id": "obj_1", "desc": "A person."}
+            row.update({"from": "ref_image_0", "src_bbox": [118, 221, 1000, 543],
+                        "tgt_bbox": [118, 221, 1000, 543]} if mode == "I2I"
+                       else {"bbox": [118, 221, 1000, 543]})
+            value["rewritten_prompt"] += " " + json.dumps([row])
+            self.assertEqual(skills.extract_prompt(json.dumps(value), mode, skills.BBOX_SKILL_ID),
+                             value["rewritten_prompt"])
+
     def test_configured_skill_selects_only_its_mode_and_rejects_unsafe_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

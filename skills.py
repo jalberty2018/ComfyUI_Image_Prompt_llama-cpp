@@ -10,6 +10,7 @@ PROMPT_PROFILE_STANDARD = "standard"
 PROMPT_PROFILE_UNCENSORED_QWEN = "uncensored fidelity QWEN"
 PROMPT_PROFILES = (PROMPT_PROFILE_STANDARD, PROMPT_PROFILE_UNCENSORED_QWEN)
 MODE_OPTIONS = ("T2I", "I2I")
+BBOX_SKILL_ID = "flux-3-image-klein-pup-bbox"
 CUSTOM_SKILL_ROOT = Path(__file__).with_name("custom_skills")
 LOGGER = logging.getLogger("ComfyUI.QwenImagePrompt.skills")
 SKILL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -354,15 +355,28 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
     profile_file = config["profiles"][prompt_profile]
     if profile_file is not None:
         parts.append(_read_skill_file(root, profile_file))
-    if additional_system_instructions.strip():
-        parts.append("# Additional system instructions\n" + additional_system_instructions.strip())
     fields = '"rewritten_prompt" and "wh_ratio"'
     if mode == "I2I":
         fields += ' and "ratio_follow"'
+    if skill == BBOX_SKILL_ID:
+        parts.append(
+            "# Required bounding-box payload\n"
+            "rewritten_prompt must contain BOTH the expanded instruction/caption AND "
+            "the complete JSON element array, escaped inside that one string. "
+            "Never return only the instruction or discard the input element table. "
+            "Use supplied object IDs and source boxes to identify the requested edit; "
+            "fill empty descriptions from the reference images. For an appearance "
+            "change, the object remains present: provide its target box, not null. "
+            "A null target box means removal only. Reference images are numbered "
+            "from ref_image_0 in attachment order."
+        )
+    if additional_system_instructions.strip():
+        parts.append("# Additional system instructions\n" + additional_system_instructions.strip())
     parts.append(
         "# ComfyUI transport contract\n"
         f"Return exactly one JSON object with exactly these string fields: {fields}. "
-        "Put the image description in rewritten_prompt and escape quotes for JSON. "
+        "Put the complete skill output in rewritten_prompt, including any required "
+        "element array, and escape quotes for JSON. "
         "This contract replaces any plain-text/no-JSON output instruction in the skill. "
         "Do not output reasoning, markdown fences, or follow-up questions. "
         "Preserve reference-image facts. Follow the skill's aspect-ratio rules; "
@@ -374,7 +388,7 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
     return "\n\n".join(parts)
 
 
-def extract_prompt(text: str, mode: str) -> str:
+def extract_prompt(text: str, mode: str, skill: str = "") -> str:
     text = re.sub(r"^\s*<think>.*?</think>\s*", "", text, flags=re.DOTALL)
     data = json.loads(normalize_model_output(text))
     expected = {"rewritten_prompt", "wh_ratio"}
@@ -389,4 +403,27 @@ def extract_prompt(text: str, mode: str) -> str:
         raise ValueError("rewritten_prompt must not be empty")
     if mode == "I2I" and data["wh_ratio"] and data["ratio_follow"]:
         raise ValueError("wh_ratio and ratio_follow must be mutually exclusive")
+    if skill == BBOX_SKILL_ID:
+        _validate_bbox_payload(result, mode)
     return result
+
+
+def _validate_bbox_payload(result: str, mode: str) -> None:
+    """Reject missing/incomplete tables so the node can request a repaired answer."""
+    for match in re.finditer(r"\[", result):
+        try:
+            rows, end = json.JSONDecoder().raw_decode(result[match.start():])
+        except ValueError:
+            continue
+        if result[match.start() + end:].strip() or not result[:match.start()].strip():
+            continue
+        if not isinstance(rows, list):
+            continue
+        required = ({"id", "from", "src_bbox", "tgt_bbox", "desc"} if mode == "I2I"
+                    else {"id", "bbox", "desc"})
+        if all(isinstance(row, dict) and required <= row.keys() for row in rows):
+            return
+    raise ValueError(
+        "rewritten_prompt must contain the complete instruction/caption followed by "
+        "a JSON element array with all required bbox row fields; do not omit the table"
+    )

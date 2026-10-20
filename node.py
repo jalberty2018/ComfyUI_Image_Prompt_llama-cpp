@@ -16,6 +16,7 @@ from .model_files import DEFAULT_MODELS, DEFAULT_MMPROJ, model_options, is_proje
 from .runtime import LlamaServerManager
 from .skills import (
     system_prompt, extract_prompt, MODE_OPTIONS, SKILL_NAMES, DEFAULT_SKILL_ID, resolve_mode,
+    BBOX_SKILL_ID,
 )
 
 MODEL_DIR = Path(folder_paths.models_dir) / "LLM"
@@ -51,10 +52,11 @@ def _sampling_settings(think_mode):
     )
 
 
-def _user_content(prompt, images):
+def _user_content(prompt, images, skill=""):
     content = []
     for index, image in enumerate(images, 1):
-        content.extend([text_content(f"<image{index}>"), image_content(image)])
+        tag = f"<ref_image_{index - 1}>" if skill == BBOX_SKILL_ID else f"<image{index}>"
+        content.extend([text_content(tag), image_content(image)])
     content.append(text_content(prompt))
     return content
 
@@ -146,13 +148,13 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 selected = skill
                 messages = [
                     {"role": "system", "content": instructions},
-                    {"role": "user", "content": _user_content(prompt, images)},
+                    {"role": "user", "content": _user_content(prompt, images, skill)},
                 ]
                 settings = dict(seed=seed, max_tokens=max_tokens, think_mode=think_mode,
                                 reasoning_effort=reasoning_effort, **_sampling_settings(think_mode))
                 result, usage = server.chat(messages, **settings)
                 try:
-                    result = extract_prompt(result, mode)
+                    result = extract_prompt(result, mode, skill)
                 except ValueError as error:
                     LOGGER.warning("[ComfyUI_Image_Prompt_llama-cpp] Repairing model output: %s", error)
                     repaired, usage = server.chat([
@@ -160,7 +162,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                         {"role": "user", "content": "Return the complete valid JSON object required "
                          "by the system prompt. Preserve the requested content. Problem: " + str(error)},
                     ], **settings)
-                    result = extract_prompt(repaired, mode)
+                    result = extract_prompt(repaired, mode, skill)
                 LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] completed in %.2fs | usage=%s", time.perf_counter() - started, usage)
                 if force_unload_model:
                     _release_node_resources()
