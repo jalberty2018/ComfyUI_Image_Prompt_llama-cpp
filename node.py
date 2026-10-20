@@ -157,12 +157,24 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                     result = extract_prompt(result, mode, skill)
                 except ValueError as error:
                     LOGGER.warning("[ComfyUI_Image_Prompt_llama-cpp] Repairing model output: %s", error)
+                    repair_instruction = (
+                        "Return the complete native annotation: an expanded instruction/caption "
+                        "followed by one JSON element array with all required row fields. "
+                        "Do not wrap it in a JSON object. "
+                        if skill == BBOX_SKILL_ID else
+                        "Return the complete valid JSON object required by the system prompt. "
+                    )
                     repaired, usage = server.chat([
                         *messages, {"role": "assistant", "content": result},
-                        {"role": "user", "content": "Return the complete valid JSON object required "
-                         "by the system prompt. Preserve the requested content. Problem: " + str(error)},
+                        {"role": "user", "content": repair_instruction
+                         + "Preserve the requested content. Problem: " + str(error)},
                     ], **settings)
-                    result = extract_prompt(repaired, mode, skill)
+                    try:
+                        result = extract_prompt(repaired, mode, skill)
+                    except ValueError as repair_error:
+                        raise ValueError(
+                            f"{repair_error}. Model response after repair: {repaired[:2000]!r}"
+                        ) from repair_error
                 LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] completed in %.2fs | usage=%s", time.perf_counter() - started, usage)
                 if force_unload_model:
                     _release_node_resources()

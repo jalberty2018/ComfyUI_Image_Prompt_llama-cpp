@@ -5,4 +5,4 @@ description: Expand generation and editing requests for FLUX.3 image klein pup w
 
 Preserve user intent and visible reference facts.
 
-For the ComfyUI transport contract, put the complete instruction or caption followed by its JSON element array inside the rewritten_prompt string. Preserve the element IDs, reference tokens and bounding boxes; do not add the table as a separate top-level field.
+Return the complete instruction or caption followed by its JSON element array directly, without an outer JSON object or rewritten_prompt string. Preserve the supplied element IDs, reference tokens and source bounding boxes.

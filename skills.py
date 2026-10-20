@@ -361,8 +361,8 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
     if skill == BBOX_SKILL_ID:
         parts.append(
             "# Required bounding-box payload\n"
-            "rewritten_prompt must contain BOTH the expanded instruction/caption AND "
-            "the complete JSON element array, escaped inside that one string. "
+            "Return BOTH the expanded instruction/caption AND "
+            "the complete JSON element array directly, without an outer JSON object. "
             "Never return only the instruction or discard the input element table. "
             "Use supplied object IDs and source boxes to identify the requested edit; "
             "fill empty descriptions from the reference images. For an appearance "
@@ -372,6 +372,15 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
         )
     if additional_system_instructions.strip():
         parts.append("# Additional system instructions\n" + additional_system_instructions.strip())
+    if skill == BBOX_SKILL_ID:
+        parts.append(
+            "# ComfyUI transport contract\n"
+            "Return the native annotation format: one instruction/caption paragraph, "
+            "one space, then one JSON element array. Do not wrap it in rewritten_prompt "
+            "or add wh_ratio or ratio_follow fields. This overrides any instruction "
+            "to escape the annotation inside a JSON string. No reasoning or markdown fences."
+        )
+        return "\n\n".join(parts)
     parts.append(
         "# ComfyUI transport contract\n"
         f"Return exactly one JSON object with exactly these string fields: {fields}. "
@@ -390,7 +399,19 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
 
 def extract_prompt(text: str, mode: str, skill: str = "") -> str:
     text = re.sub(r"^\s*<think>.*?</think>\s*", "", text, flags=re.DOTALL)
-    data = json.loads(normalize_model_output(text))
+    text = normalize_model_output(text)
+    if skill == BBOX_SKILL_ID:
+        # Prefer the model's native annotation format; retain compatibility with
+        # responses following the older JSON transport instructions.
+        try:
+            wrapped = json.loads(text)
+        except ValueError:
+            wrapped = None
+        if isinstance(wrapped, dict) and isinstance(wrapped.get("rewritten_prompt"), str):
+            text = wrapped["rewritten_prompt"].strip()
+        _validate_bbox_payload(text, mode)
+        return text
+    data = json.loads(text)
     expected = {"rewritten_prompt", "wh_ratio"}
     if mode == "I2I":
         expected.add("ratio_follow")
@@ -403,8 +424,6 @@ def extract_prompt(text: str, mode: str, skill: str = "") -> str:
         raise ValueError("rewritten_prompt must not be empty")
     if mode == "I2I" and data["wh_ratio"] and data["ratio_follow"]:
         raise ValueError("wh_ratio and ratio_follow must be mutually exclusive")
-    if skill == BBOX_SKILL_ID:
-        _validate_bbox_payload(result, mode)
     return result
 
 
@@ -424,6 +443,6 @@ def _validate_bbox_payload(result: str, mode: str) -> None:
         if all(isinstance(row, dict) and required <= row.keys() for row in rows):
             return
     raise ValueError(
-        "rewritten_prompt must contain the complete instruction/caption followed by "
+        "The output must contain the complete instruction/caption followed by "
         "a JSON element array with all required bbox row fields; do not omit the table"
     )

@@ -291,6 +291,7 @@ class NodeTests(unittest.TestCase):
 
     def test_bbox_missing_table_is_repaired_and_references_are_zero_based(self):
         repaired = response("I2I", node.BBOX_SKILL_ID)
+        repaired = (json.loads(repaired[0])["rewritten_prompt"], repaired[1])
         self.server.chat.side_effect = [response("I2I"), repaired]
         result = node.ImagePromptLlamaCpp.execute(
             'Change <obj_1> to a dark skinned boy. '
@@ -298,12 +299,27 @@ class NodeTests(unittest.TestCase):
             '"tgt_bbox":null,"desc":""}]',
             skill=node.BBOX_SKILL_ID, mode="I2I", mmproj=node.DEFAULT_MMPROJ,
             reference_image_2=image("first"), reference_image_10=image("second"))
-        self.assertEqual(result.result[0], json.loads(repaired[0])["rewritten_prompt"])
+        self.assertEqual(result.result[0], repaired[0])
         messages = self.server.chat.call_args.args[0]
         self.assertEqual([p["text"] for p in messages[1]["content"][:-1]
                           if p["type"] == "text"], ["<ref_image_0>", "<ref_image_1>"])
         self.assertIn("do not omit the table", messages[-1]["content"])
+        self.assertIn("Do not wrap it in a JSON object", messages[-1]["content"])
         self.assertEqual(self.server.chat.call_count, 2)
+
+    def test_bbox_native_response_needs_no_repair(self):
+        native = json.loads(response("I2I", node.BBOX_SKILL_ID)[0])["rewritten_prompt"]
+        self.server.chat.return_value = (native, {})
+        result = node.ImagePromptLlamaCpp.execute(
+            "Edit the person", skill=node.BBOX_SKILL_ID, mode="I2I",
+            mmproj=node.DEFAULT_MMPROJ, reference_image_1=image())
+        self.assertEqual(result.result[0], native)
+        self.server.chat.assert_called_once()
+
+    def test_failed_bbox_repair_reports_actual_model_response(self):
+        self.server.chat.return_value = ("Change the person.", {})
+        with self.assertRaisesRegex(ValueError, "Model response after repair: 'Change the person.'"):
+            node.ImagePromptLlamaCpp.execute("Edit", skill=node.BBOX_SKILL_ID)
 
     def test_failure_always_unloads_even_when_reuse_enabled(self):
         self.server.chat.return_value = ("invalid", {})

@@ -101,6 +101,14 @@ class ImageSkillsTests(unittest.TestCase):
             value["rewritten_prompt"] += " " + json.dumps([row])
             self.assertEqual(skills.extract_prompt(json.dumps(value), mode, skills.BBOX_SKILL_ID),
                              value["rewritten_prompt"])
+            for native in (value["rewritten_prompt"],
+                           "```\n" + value["rewritten_prompt"] + "\n```",
+                           "<think>Plan the edit.</think>\n" + value["rewritten_prompt"]):
+                self.assertEqual(skills.extract_prompt(native, mode, skills.BBOX_SKILL_ID),
+                                 value["rewritten_prompt"])
+            system = skills.system_prompt(skills.BBOX_SKILL_ID, mode)
+            self.assertIn("Return the native annotation format", system)
+            self.assertNotIn("exactly these string fields", system)
 
     def test_configured_skill_selects_only_its_mode_and_rejects_unsafe_paths(self):
         with tempfile.TemporaryDirectory() as directory:
