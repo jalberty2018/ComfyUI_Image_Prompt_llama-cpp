@@ -94,9 +94,16 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 io.String.Input("additional_system_instructions", multiline=True, dynamic_prompts=True, default=""),
                 io.Combo.Input("mode", options=list(MODE_OPTIONS), default="T2I",
                                tooltip="T2I: text only. I2I: requires reference images and a matching mmproj."),
-                *[io.Image.Input(f"reference_image_{index}", optional=True,
-                                 tooltip="Optional single image. Empty inputs are skipped; batches are not supported.")
-                  for index in range(1, 11)],
+                io.Autogrow.Input(
+                    "reference_images",
+                    template=io.Autogrow.TemplateNames(
+                        input=io.Image.Input("image", optional=True),
+                        names=[f"reference_image_{index}" for index in range(1, 11)],
+                        min=1,
+                    ),
+                    optional=True,
+                    tooltip="Connect a single image to reveal the next input (maximum 10).",
+                ),
             ],
             # Preserve existing output positions and append the full system prompt.
             outputs=[io.String.Output("enhanced_prompt"), io.String.Output("selected_skill"),
@@ -112,7 +119,8 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 reference_image_1=None, reference_image_2=None, reference_image_3=None,
                 reference_image_4=None, reference_image_5=None, reference_image_6=None,
                 reference_image_7=None, reference_image_8=None, reference_image_9=None,
-                reference_image_10=None, mmproj="", mode="T2I") -> io.NodeOutput:
+                reference_image_10=None, mmproj="", mode="T2I",
+                reference_images=None) -> io.NodeOutput:
         started = time.perf_counter()
         # Keep cleanup inside the same lock as inference, including error cleanup.
         with INFERENCE_LOCK:
@@ -125,6 +133,11 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                     reference_image_7, reference_image_8, reference_image_9,
                     reference_image_10,
                 ) if image is not None]
+                if reference_images is not None:
+                    # Template order is authoritative, regardless of dict insertion order.
+                    images = [reference_images[f"reference_image_{index}"]
+                              for index in range(1, 11)
+                              if reference_images.get(f"reference_image_{index}") is not None]
                 mode = resolve_mode(mode, len(images))
                 if skill not in SKILL_NAMES:
                     raise ValueError(f"Unknown skill: {skill}; select an available skill")

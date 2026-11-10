@@ -30,6 +30,7 @@ class NodeOutput:
 
 
 io = types.SimpleNamespace(ComfyNode=object, Schema=Field, NodeOutput=NodeOutput,
+                           Autogrow=types.SimpleNamespace(Input=Field, TemplateNames=Field),
                            **{name: types.SimpleNamespace(Input=Field, Output=Field)
                               for name in ("Image", "String", "Combo", "Boolean", "Int")})
 management = types.ModuleType("comfy.model_management")
@@ -120,11 +121,14 @@ class NodeTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_schema_has_ten_fixed_optional_images_and_expected_outputs(self):
+    def test_schema_has_autogrowing_optional_images_and_expected_outputs(self):
         schema = node.ImagePromptLlamaCpp.define_schema()
-        images = [field for field in schema.inputs if (field.name or "").startswith("reference_image_")]
-        self.assertEqual(len(images), 10)
-        self.assertTrue(all(field.optional for field in images))
+        references = next(field for field in schema.inputs if field.name == "reference_images")
+        self.assertTrue(references.optional)
+        self.assertTrue(references.template.input.optional)
+        self.assertEqual(references.template.min, 1)
+        self.assertEqual(references.template.names,
+                         [f"reference_image_{index}" for index in range(1, 11)])
         self.assertEqual([o.name for o in schema.outputs], ["enhanced_prompt", "selected_skill", "detected_mode", "system_prompt"])
         for removed in ("model_mode", "t2i_model", "i2i_model", "prompt_profile"):
             self.assertNotIn(removed, [f.name for f in schema.inputs])
@@ -146,6 +150,26 @@ class NodeTests(unittest.TestCase):
                                          self.server.chat.call_args.args[0][0]["content"].replace("{", "{{").replace("}", "}}")))
         self.assertIsNone(self.manager.acquire.call_args.args[1])
         self.manager.release.assert_called_once()
+
+    def test_autogrow_images_follow_numeric_socket_order(self):
+        self.server.chat.return_value = response("I2I")
+        node.ImagePromptLlamaCpp.execute(
+            "Combine these", mode="I2I", mmproj=node.DEFAULT_MMPROJ,
+            reference_images={"reference_image_10": image("tenth"),
+                              "reference_image_2": image("second"),
+                              "reference_image_1": None})
+        content = self.server.chat.call_args.args[0][1]["content"]
+        self.assertEqual([item["image_url"]["url"] for item in content if item["type"] == "image_url"],
+                         ["second", "tenth"])
+
+    def test_empty_autogrow_is_optional_for_t2i(self):
+        node.ImagePromptLlamaCpp.execute("A bicycle", reference_images={})
+        self.assertIsNone(self.manager.acquire.call_args.args[1])
+
+    def test_empty_autogrow_is_rejected_for_i2i(self):
+        with self.assertRaisesRegex(ValueError, "at least one reference"):
+            node.ImagePromptLlamaCpp.execute("Edit", mode="I2I", reference_images={})
+        self.manager.acquire.assert_not_called()
 
     def test_sparse_images_are_forwarded_in_socket_order(self):
         self.server.chat.return_value = response("I2I")
