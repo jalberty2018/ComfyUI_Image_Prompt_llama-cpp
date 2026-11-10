@@ -49,12 +49,18 @@ are rejected before model loading. Referenced files must stay inside the skill.
 
 The loader combines only the selected mode's prompt, `SKILL.md`, all `.md` and
 `.txt` files under `references/`, the selected profile's prompt, and additional
-system instructions, in that order. It then appends the shared JSON contract.
+system instructions, in that order. It then appends the skill-specific transport contract (JSON by default).
 Store system prompts in `prompts/` and select them through `skill.json`.
 Use optional `references/` only for supplementary guidance shared across modes.
 No scripts execute and no internet links are fetched during inference.
 
 ## Included skills
+
+- [Minimax-H3-image-pe](Minimax-H3-image-pe/SKILL.md): select `minimax-h3-image-pe`.
+  T2I uses the first user-supplied prompt; I2I uses the second. Both use the
+  standard profile and return plain text directly, without the shared JSON
+  contract. Aspect-ratio rules guide composition internally. I2I receives
+  `<Picture N>` references with exact ratios from the input tensors.
 
 - [FLUX.3 klein pup](flux-3-image-klein-pup/SKILL.md): T2I and I2I with the standard profile, using the original `t2i` and `i2i` system prompts.
 - [FLUX.3 klein pup bounding boxes](flux-3-image-klein-pup-bbox/SKILL.md): T2I and I2I with the standard profile, using `t2i_bbox` and `i2i_bbox`. The complete caption/instruction and element table are returned directly in the native annotation format, without an outer JSON wrapper. Older responses wrapped in `rewritten_prompt` are also accepted if they contain the complete table. Both FLUX skills use `SKILL.md`, `skill.json`, `prompts/T2I.txt`, `prompts/I2I.txt` and `prompts/sources.json`, matching the Qwen structure. Original prompts and pinned source revisions are preserved under `prompts/`.
@@ -67,7 +73,7 @@ No scripts execute and no internet links are fetched during inference.
   adapted to include `ratio_follow` in the node's JSON output schema.
 
 Skills are self-contained: no skill automatically inherits Qwen instructions.
-The common transport contract overrides bare-prose output requirements and
+For skills using JSON, the common transport contract overrides bare-prose output requirements and
 requires string fields `rewritten_prompt` and `wh_ratio`, plus `ratio_follow`
 for I2I. Skill-specific aspect-ratio rules are preserved. Without such rules,
 `wh_ratio` is the requested ratio or empty. The node extracts `rewritten_prompt`

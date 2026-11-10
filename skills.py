@@ -10,6 +10,7 @@ PROMPT_PROFILE_STANDARD = "standard"
 PROMPT_PROFILE_UNCENSORED_QWEN = "uncensored fidelity QWEN"
 PROMPT_PROFILES = (PROMPT_PROFILE_STANDARD, PROMPT_PROFILE_UNCENSORED_QWEN)
 MODE_OPTIONS = ("T2I", "I2I")
+MINIMAX_SKILL_ID = "minimax-h3-image-pe"
 BBOX_SKILL_ID = "flux-3-image-klein-pup-bbox"
 CUSTOM_SKILL_ROOT = Path(__file__).with_name("custom_skills")
 LOGGER = logging.getLogger("ComfyUI.QwenImagePrompt.skills")
@@ -372,6 +373,13 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
         )
     if additional_system_instructions.strip():
         parts.append("# Additional system instructions\n" + additional_system_instructions.strip())
+    if skill.casefold() == MINIMAX_SKILL_ID:
+        parts.append(
+            "# ComfyUI transport contract\n"
+            "Return only the complete caption or editing description as plain text. "
+            "Do not output JSON, field names, ratio metadata, reasoning, or markdown fences."
+        )
+        return "\n\n".join(parts)
     if skill == BBOX_SKILL_ID:
         parts.append(
             "# ComfyUI transport contract\n"
@@ -400,6 +408,14 @@ def system_prompt(skill: str, mode: str, prompt_profile: str = PROMPT_PROFILE_ST
 def extract_prompt(text: str, mode: str, skill: str = "") -> str:
     text = re.sub(r"^\s*<think>.*?</think>\s*", "", text, flags=re.DOTALL)
     text = normalize_model_output(text)
+    if skill.casefold() == MINIMAX_SKILL_ID:
+        if not text:
+            raise ValueError("The plain-text description must not be empty")
+        try:
+            wrapped = json.loads(text)
+        except ValueError:
+            return text
+        raise ValueError("Return a plain-text description, not JSON")
     if skill == BBOX_SKILL_ID:
         # Prefer the model's native annotation format; retain compatibility with
         # responses following the older JSON transport instructions.

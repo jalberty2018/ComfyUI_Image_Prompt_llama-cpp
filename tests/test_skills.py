@@ -16,6 +16,19 @@ spec.loader.exec_module(skills)
 
 
 class ImageSkillsTests(unittest.TestCase):
+    def test_minimax_plain_text_modes(self):
+        self.assertIn(skills.MINIMAX_SKILL_ID, skills.SKILL_NAMES)
+        for mode in skills.MODE_OPTIONS:
+            prompt = skills.system_prompt(skills.MINIMAX_SKILL_ID, mode)
+            self.assertIn("Return only the complete", prompt)
+            self.assertNotIn("Return exactly one JSON object", prompt)
+            self.assertNotIn("{input text}", prompt)
+            caption = "A sign reads '你好'."
+            self.assertEqual(skills.extract_prompt(caption, mode, skills.MINIMAX_SKILL_ID), caption)
+            for invalid in ("", '{"expanded_caption": "caption"}'):
+                with self.assertRaises(ValueError):
+                    skills.extract_prompt(invalid, mode, skills.MINIMAX_SKILL_ID)
+
     def test_modes(self):
         self.assertEqual(skills.MODE_OPTIONS, ("T2I", "I2I"))
         for count in range(11):

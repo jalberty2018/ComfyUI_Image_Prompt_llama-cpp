@@ -59,6 +59,8 @@ def image(label="image", batch=1):
 
 
 def response(mode="T2I", skill=""):
+    if skill == node.MINIMAX_SKILL_ID:
+        return "A precise image prompt.", {"total_tokens": 42}
     value = {"rewritten_prompt": "A precise image prompt.", "wh_ratio": "1:1"}
     if skill == node.BBOX_SKILL_ID:
         row = {"id": "person_1", "desc": "A person."}
@@ -72,6 +74,28 @@ def response(mode="T2I", skill=""):
 
 
 class NodeTests(unittest.TestCase):
+    def test_minimax_reference_metadata(self):
+        reference = types.SimpleNamespace(shape=(1, 900, 1200, 3), label="source")
+        content = node._user_content("Edit the sign", [reference], node.MINIMAX_SKILL_ID)
+        self.assertEqual(content[0]["text"], "Reference Media: <Picture 1> aspect_ratio 4:3")
+        self.assertEqual(content[-1]["text"], "Edit the sign")
+
+    def test_minimax_plain_text_needs_no_repair(self):
+        self.server.chat.return_value = ("A detailed caption.", {"total_tokens": 42})
+        result = node.ImagePromptLlamaCpp.execute("A scene", skill=node.MINIMAX_SKILL_ID)
+        self.assertEqual(result.result[0], "A detailed caption.")
+        self.assertEqual(self.server.chat.call_count, 1)
+
+    def test_minimax_repair_requests_plain_text(self):
+        self.server.chat.side_effect = [
+            ('{"expanded_caption": "caption"}', {"total_tokens": 42}),
+            ("A detailed caption.", {"total_tokens": 42}),
+        ]
+        result = node.ImagePromptLlamaCpp.execute("A scene", skill=node.MINIMAX_SKILL_ID)
+        self.assertEqual(result.result[0], "A detailed caption.")
+        messages = self.server.chat.call_args.args[0]
+        self.assertIn("as plain text, without JSON", messages[-1]["content"])
+
     def test_package_entrypoint_loads_new_node(self):
         spec = importlib.util.spec_from_file_location(PACKAGE, ROOT / "__init__.py",
                                                      submodule_search_locations=[str(ROOT)])

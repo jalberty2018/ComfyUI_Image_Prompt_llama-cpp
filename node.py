@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import gc
 import logging
+import math
 import threading
 import time
 from pathlib import Path
@@ -16,7 +17,7 @@ from .model_files import DEFAULT_MODELS, DEFAULT_MMPROJ, model_options, is_proje
 from .runtime import LlamaServerManager
 from .skills import (
     system_prompt, extract_prompt, MODE_OPTIONS, SKILL_NAMES, DEFAULT_SKILL_ID, resolve_mode,
-    BBOX_SKILL_ID,
+    BBOX_SKILL_ID, MINIMAX_SKILL_ID,
 )
 
 MODEL_DIR = Path(folder_paths.models_dir) / "LLM"
@@ -56,6 +57,10 @@ def _user_content(prompt, images, skill=""):
     content = []
     for index, image in enumerate(images, 1):
         tag = f"<ref_image_{index - 1}>" if skill == BBOX_SKILL_ID else f"<image{index}>"
+        if skill.casefold() == MINIMAX_SKILL_ID:
+            height, width = map(int, image.shape[1:3])
+            divisor = math.gcd(width, height)
+            tag = f"Reference Media: <Picture {index}> aspect_ratio {width // divisor}:{height // divisor}"
         content.extend([text_content(tag), image_content(image)])
     content.append(text_content(prompt))
     return content
@@ -162,6 +167,8 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                         "followed by one JSON element array with all required row fields. "
                         "Do not wrap it in a JSON object. "
                         if skill == BBOX_SKILL_ID else
+                        "Return only the complete description as plain text, without JSON. "
+                        if skill.casefold() == MINIMAX_SKILL_ID else
                         "Return the complete valid JSON object required by the system prompt. "
                     )
                     repaired, usage = server.chat([
