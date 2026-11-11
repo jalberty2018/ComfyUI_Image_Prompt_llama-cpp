@@ -43,14 +43,34 @@ def _validate_reference_images(images):
             raise ValueError(f"Reference image {index} must be a non-empty RGB or RGBA image")
 
 
-def _sampling_settings(think_mode):
-    return dict(
-        temperature=1.0 if think_mode else 0.7,
-        top_p=0.95 if think_mode else 0.8,
-        top_k=20, min_p=0.0,
-        presence_penalty=0.0 if think_mode else 1.5,
-        repetition_penalty=1.0,
-    )
+def _sampling_settings(think_mode: bool, sampling_mode=None) -> dict[str, float | int]:
+    if sampling_mode is not None:
+        mode = sampling_mode.get("sampling_mode")
+        if mode == "off":
+            return dict(temperature=0.0, top_p=1.0, top_k=1, min_p=0.0,
+                        presence_penalty=0.0, repetition_penalty=1.0)
+        if mode != "on":
+            raise ValueError("sampling_mode must be on or off")
+        settings = _sampling_settings(think_mode)
+        settings.update({key: sampling_mode[key] for key in settings if key in sampling_mode})
+        return settings
+    if think_mode:
+        return {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 0.0,
+            "repetition_penalty": 1.0,
+        }
+    return {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+    }
 
 
 def _user_content(prompt, images, skill=""):
@@ -94,6 +114,26 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 io.String.Input("additional_system_instructions", multiline=True, dynamic_prompts=True, default=""),
                 io.Combo.Input("mode", options=list(MODE_OPTIONS), default="T2I",
                                tooltip="T2I: text only. I2I: requires reference images and a matching mmproj."),
+                io.DynamicCombo.Input(
+                    "sampling_mode",
+                    display_name="Sampling Mode",
+                    options=[
+                        io.DynamicCombo.Option(key="on", inputs=[
+                            io.Float.Input("temperature", default=0.7, min=0.0, max=2.0, step=0.01),
+                            io.Int.Input("top_k", default=20, min=0, max=1000),
+                            io.Float.Input("top_p", default=0.8, min=0.0, max=1.0, step=0.01),
+                            io.Float.Input("min_p", default=0.0, min=0.0, max=1.0, step=0.01),
+                            io.Float.Input("repetition_penalty", default=1.0, min=0.0, max=5.0, step=0.01),
+                            io.Float.Input("presence_penalty", default=1.5, min=-2.0, max=2.0, step=0.01),
+                        ]),
+                        io.DynamicCombo.Option(key="off", inputs=[]),
+                    ],
+                    tooltip="On uses the visible sampling settings. Off uses greedy decoding without penalties. Seed remains available above.",
+                ),
+                io.Combo.Input(
+                    "mtp", options=["auto", "on", "off"], default="auto",
+                    tooltip="llama.cpp MTP speculative decoding. Auto tries MTP and falls back if startup fails; on requires a compatible runtime and GGUF with MTP weights. Changing this restarts the local server.",
+                ),
                 io.Autogrow.Input(
                     "reference_images",
                     template=io.Autogrow.TemplateNames(
@@ -120,7 +160,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 reference_image_4=None, reference_image_5=None, reference_image_6=None,
                 reference_image_7=None, reference_image_8=None, reference_image_9=None,
                 reference_image_10=None, mmproj="", mode="T2I",
-                reference_images=None) -> io.NodeOutput:
+                reference_images=None, sampling_mode=None, mtp="auto") -> io.NodeOutput:
         started = time.perf_counter()
         # Keep cleanup inside the same lock as inference, including error cleanup.
         with INFERENCE_LOCK:
@@ -160,7 +200,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                 projector = resolve_gguf(MODEL_DIR, mmproj, LOGGER) if mode == "I2I" else None
                 comfy.model_management.unload_all_models()
                 comfy.model_management.soft_empty_cache()
-                server, loaded_new = SERVER_MANAGER.acquire(model, projector)
+                server, loaded_new = SERVER_MANAGER.acquire(model, projector, mtp=mtp)
                 LOGGER.info("[ComfyUI_Image_Prompt_llama-cpp] mode=%s images=%d model=%s new=%s seed=%d",
                             mode, len(images), model.name, loaded_new, seed)
                 selected = skill
@@ -169,7 +209,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                     {"role": "user", "content": _user_content(prompt, images, skill)},
                 ]
                 settings = dict(seed=seed, max_tokens=max_tokens, think_mode=think_mode,
-                                reasoning_effort=reasoning_effort, **_sampling_settings(think_mode))
+                                reasoning_effort=reasoning_effort, **_sampling_settings(think_mode, sampling_mode))
                 result, usage = server.chat(messages, **settings)
                 try:
                     result = extract_prompt(result, mode, skill)

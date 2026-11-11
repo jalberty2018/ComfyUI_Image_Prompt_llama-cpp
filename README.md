@@ -96,3 +96,15 @@ Every skill, including Qwen and Krea, lives under `custom_skills/`. Each skill's
 loader selects those files without special cases for skill IDs. Skills do not
 inherit another skill's instructions. See [the skill format](custom_skills/README.md)
 for configuration, loading order, and the shared JSON transport contract.
+
+
+### Sampling Mode and MTP (local llama.cpp)
+
+- **Sampling Mode on** exposes temperature, top_k, top_p, min_p, repetition_penalty and presence_penalty. Initial values match this node's instruct preset. Thinking is independent; for the previous thinking preset use temperature 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 0 and repetition_penalty 1.
+- **Sampling Mode off** uses greedy decoding (temperature 0, top_k 1) with neutral penalties. Hidden sampling values are ignored. The existing seed widget remains in its original position.
+- **mtp auto** attempts `--spec-type draft-mtp`. If server startup fails, it logs the failure and retries without MTP. This is startup fallback, not ComfyUI's adaptive MTP algorithm.
+- **mtp on** requires a compatible llama.cpp build and GGUF containing MTP weights; startup failures are reported. **off** starts without MTP flags. Changing the selection reloads a resident server. Separate draft GGUFs and ComfyUI tree modes are not configured by this node.
+
+The generation and automatic repair calls share the chosen sampling settings. API calls omitting sampling_mode retain the old thinking/instruct presets. Restart ComfyUI and refresh the browser after updating. A new node instance exposes the new inputs; check settings when loading older workflows.
+
+Backend reference: https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md

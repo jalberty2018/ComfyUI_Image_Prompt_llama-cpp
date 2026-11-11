@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +120,56 @@ class ServerLifecycleTests(unittest.TestCase):
             self.assertEqual(payload["seed"], (2**64 - 1) % 0xFFFFFFFF)
             self.assertTrue(payload["chat_template_kwargs"]["enable_thinking"])
             self.assertEqual(payload["reasoning_effort"], "xhigh")
+
+
+class MtpTests(unittest.TestCase):
+    def test_auto_fallback_is_reused_and_mode_change_restarts(self):
+        spec = MagicMock()
+        first, fallback, disabled = MagicMock(), MagicMock(), MagicMock()
+        first.start.side_effect = RuntimeError("MTP unsupported")
+        with patch.object(runtime, "load_runtime_spec", return_value=spec), patch.object(
+            runtime, "LlamaServer", side_effect=[first, fallback, disabled]
+        ) as factory:
+            manager = runtime.LlamaServerManager()
+            model, projector = Path("model.gguf"), Path("mmproj.gguf")
+            server, fresh = manager.acquire(model, projector, mtp="auto")
+            self.assertIs(server, fallback)
+            self.assertTrue(fresh)
+            first.stop.assert_called_once()
+            self.assertEqual(factory.call_args.kwargs["mtp"], "off")
+            self.assertEqual(manager.acquire(model, projector, mtp="auto"), (fallback, False))
+            self.assertEqual(manager.acquire(model, projector, mtp="off"), (disabled, True))
+            fallback.stop.assert_called_once()
+            manager.release()
+
+    def test_explicit_on_propagates_failure(self):
+        server = MagicMock()
+        server.start.side_effect = RuntimeError("MTP unsupported")
+        with patch.object(runtime, "load_runtime_spec"), patch.object(
+            runtime, "LlamaServer", return_value=server
+        ) as factory:
+            with self.assertRaisesRegex(RuntimeError, "MTP unsupported"):
+                runtime.LlamaServerManager().acquire(Path("m"), Path("p"), mtp="on")
+            self.assertEqual(factory.call_count, 1)
+            server.stop.assert_called_once()
+
+    def test_start_passes_mtp_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "llama-server"
+            executable.touch()
+            spec = runtime.RuntimeSpec(executable, (), "linux", "test", "auto", False, 1536, "auto")
+            for mode in ("auto", "on", "off"):
+                server = runtime.LlamaServer(Path("m"), Path("p"), runtime_spec=spec, mtp=mode)
+                with patch.object(runtime.subprocess, "Popen") as process, patch.object(server, "_request"):
+                    process.return_value.poll.return_value = None
+                    try:
+                        server.start()
+                        args = process.call_args.args[0]
+                        self.assertEqual("--spec-type" in args, mode != "off")
+                        if mode != "off":
+                            self.assertEqual(args[args.index("--spec-type") + 1], "draft-mtp")
+                    finally:
+                        server.stop()
 
 
 if __name__ == "__main__":

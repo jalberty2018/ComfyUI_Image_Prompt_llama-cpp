@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import socket
@@ -170,7 +171,11 @@ class LlamaServer:
         mmproj: Path | None,
         context_size: int = 32768,
         runtime_spec: RuntimeSpec | None = None,
+        mtp: str = "off",
     ):
+        if mtp not in ("auto", "on", "off"):
+            raise ValueError("mtp must be auto, on, or off")
+        self.mtp = mtp
         self.model = model
         self.mmproj = mmproj
         self.context_size = context_size
@@ -264,6 +269,8 @@ class LlamaServer:
         ]
         if self.mmproj is not None:
             arguments.extend(["--mmproj", str(self.mmproj)])
+        if self.mtp != "off":
+            arguments.extend(["--spec-type", "draft-mtp"])
         if self.runtime_spec.fit:
             arguments.extend(
                 [
@@ -380,10 +387,10 @@ class LlamaServerManager:
     def __init__(self):
         self._lock = threading.RLock()
         self._server: LlamaServer | None = None
-        self._key: tuple[Path, Path | None, int, Path, str, str] | None = None
+        self._key: tuple[Path, Path | None, int, Path, str, str, str] | None = None
 
     def acquire(
-        self, model: Path, mmproj: Path | None, context_size: int = 32768
+        self, model: Path, mmproj: Path | None, context_size: int = 32768, mtp: str = "off"
     ) -> tuple[LlamaServer, bool]:
         runtime_spec = load_runtime_spec()
         key = (
@@ -393,18 +400,29 @@ class LlamaServerManager:
             runtime_spec.executable.resolve(),
             runtime_spec.platform_name,
             runtime_spec.backend,
+            mtp,
         )
         with self._lock:
             if self._server is not None and self._key == key and self._server.is_running:
                 return self._server, False
 
             self.release()
-            server = LlamaServer(model, mmproj, context_size, runtime_spec)
+            server = LlamaServer(model, mmproj, context_size, runtime_spec, mtp=mtp)
             try:
                 server.start()
-            except Exception:
+            except Exception as error:
                 server.stop()
-                raise
+                if mtp != "auto":
+                    raise
+                logging.getLogger("ComfyUI.ImagePromptLlamaCpp").warning(
+                    "[ComfyUI_Image_Prompt_llama-cpp] MTP auto startup failed; retrying without MTP: %s", error
+                )
+                server = LlamaServer(model, mmproj, context_size, runtime_spec, mtp="off")
+                try:
+                    server.start()
+                except Exception:
+                    server.stop()
+                    raise
             self._server = server
             self._key = key
             return server, True

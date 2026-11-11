@@ -30,9 +30,10 @@ class NodeOutput:
 
 
 io = types.SimpleNamespace(ComfyNode=object, Schema=Field, NodeOutput=NodeOutput,
+                           DynamicCombo=types.SimpleNamespace(Input=Field, Option=Field),
                            Autogrow=types.SimpleNamespace(Input=Field, TemplateNames=Field),
                            **{name: types.SimpleNamespace(Input=Field, Output=Field)
-                              for name in ("Image", "String", "Combo", "Boolean", "Int")})
+                              for name in ("Image", "String", "Combo", "Boolean", "Int", "Float")})
 management = types.ModuleType("comfy.model_management")
 management.soft_empty_cache = Mock()
 management.unload_all_models = Mock()
@@ -75,6 +76,29 @@ def response(mode="T2I", skill=""):
 
 
 class NodeTests(unittest.TestCase):
+    def test_sampling_switch_schema(self):
+        fields = {f.name: f for f in node.ImagePromptLlamaCpp.define_schema().inputs}
+        options = fields["sampling_mode"].options
+        self.assertEqual([o.key for o in options], ["on", "off"])
+        self.assertEqual(len(options[0].inputs), 6)
+        self.assertEqual(options[1].inputs, [])
+        self.assertEqual(fields["mtp"].options, ["auto", "on", "off"])
+
+    def test_sampling_and_mtp_reach_generation_and_repair(self):
+        self.server.chat.side_effect = [("invalid", {}), response()]
+        node.ImagePromptLlamaCpp.execute("A bicycle", mtp="off",
+            sampling_mode={"sampling_mode": "on", "temperature": 0.3, "top_k": 40})
+        self.assertEqual(self.manager.acquire.call_args.kwargs["mtp"], "off")
+        for call in self.server.chat.call_args_list:
+            self.assertEqual(call.kwargs["temperature"], 0.3)
+            self.assertEqual(call.kwargs["top_k"], 40)
+
+    def test_sampling_off_uses_greedy_generation(self):
+        node.ImagePromptLlamaCpp.execute("A bicycle",
+            sampling_mode={"sampling_mode": "off", "temperature": 1.8})
+        self.assertEqual(self.server.chat.call_args.kwargs["temperature"], 0.0)
+        self.assertEqual(self.server.chat.call_args.kwargs["repetition_penalty"], 1.0)
+
     def test_minimax_reference_metadata(self):
         reference = types.SimpleNamespace(shape=(1, 900, 1200, 3), label="source")
         content = node._user_content("Edit the sign", [reference], node.MINIMAX_SKILL_ID)
@@ -291,14 +315,14 @@ class NodeTests(unittest.TestCase):
         self.assertIn("Other/mmproj-other-f16.gguf", next(f for f in schema.inputs if f.name == "mmproj").options)
         result = node.ImagePromptLlamaCpp.execute("Describe", model="Other/model-Q5_K_M.gguf")
         self.assertEqual(result.result[2], "T2I")
-        self.manager.acquire.assert_called_with(model, None)
+        self.manager.acquire.assert_called_with(model, None, mtp="auto")
         with self.assertRaisesRegex(ValueError, "Select the I2I mmproj"):
             node.ImagePromptLlamaCpp.execute("Edit", mode="I2I", model="Other/model-Q5_K_M.gguf", reference_image_1=image())
         self.server.chat.return_value = response("I2I")
         result = node.ImagePromptLlamaCpp.execute("Edit", mode="I2I", model="Other/model-Q5_K_M.gguf",
                                              mmproj="Other/mmproj-other-f16.gguf", reference_image_1=image("reference"))
         self.assertEqual(result.result[2], "I2I")
-        self.manager.acquire.assert_called_with(model, projector)
+        self.manager.acquire.assert_called_with(model, projector, mtp="auto")
         content = self.server.chat.call_args.args[0][1]["content"]
         self.assertTrue(any(part.get("image_url", {}).get("url") == "reference" for part in content))
 
@@ -320,7 +344,7 @@ class NodeTests(unittest.TestCase):
     def test_mode_overrides_model_filename_and_connected_images(self):
         result = node.ImagePromptLlamaCpp.execute("A bicycle", mode="T2I", model=node.DEFAULT_MODELS["I2I"], reference_image_1=image())
         self.assertEqual(result.result[2], "T2I")
-        self.manager.acquire.assert_called_with(self.root / node.DEFAULT_MODELS["I2I"], None)
+        self.manager.acquire.assert_called_with(self.root / node.DEFAULT_MODELS["I2I"], None, mtp="auto")
 
     def test_more_than_ten_images_rejected(self):
         with self.assertRaisesRegex(ValueError, "At most 10"):
