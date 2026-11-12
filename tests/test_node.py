@@ -79,9 +79,9 @@ class NodeTests(unittest.TestCase):
     def test_sampling_switch_schema(self):
         fields = {f.name: f for f in node.ImagePromptLlamaCpp.define_schema().inputs}
         options = fields["sampling_mode"].options
-        self.assertEqual([o.key for o in options], ["on", "off"])
-        self.assertEqual(len(options[0].inputs), 6)
-        self.assertEqual(options[1].inputs, [])
+        self.assertEqual([o.key for o in options], ["off", "on"])
+        self.assertEqual(options[0].inputs, [])
+        self.assertEqual(len(options[1].inputs), 6)
         self.assertEqual(fields["mtp"].options, ["auto", "on", "off"])
 
     def test_sampling_and_mtp_reach_generation_and_repair(self):

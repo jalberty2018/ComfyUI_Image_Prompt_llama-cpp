@@ -118,6 +118,7 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                     "sampling_mode",
                     display_name="Sampling Mode",
                     options=[
+                        io.DynamicCombo.Option(key="off", inputs=[]),
                         io.DynamicCombo.Option(key="on", inputs=[
                             io.Float.Input("temperature", default=0.7, min=0.0, max=2.0, step=0.01),
                             io.Int.Input("top_k", default=20, min=0, max=1000),
@@ -126,7 +127,6 @@ class ImagePromptLlamaCpp(io.ComfyNode):
                             io.Float.Input("repetition_penalty", default=1.0, min=0.0, max=5.0, step=0.01),
                             io.Float.Input("presence_penalty", default=1.5, min=-2.0, max=2.0, step=0.01),
                         ]),
-                        io.DynamicCombo.Option(key="off", inputs=[]),
                     ],
                     tooltip="On uses the visible sampling settings. Off uses greedy decoding without penalties. Seed remains available above.",
                 ),
